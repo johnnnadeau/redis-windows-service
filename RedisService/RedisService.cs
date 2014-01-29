@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.ServiceProcess;
@@ -8,18 +9,14 @@ namespace RedisService
     public class RedisService : ServiceBase
     {
         const string RedisServer = "redis-server.exe";
-        //const string RedisCLI = "redis-cli.exe";
         private string _path;
-        private int _port;
-        private Process _process;
+        private List<Process> _process = new List<Process>();
 
         protected override void OnStart(string[] args)
         {
             _path = AppDomain.CurrentDomain.BaseDirectory;
-            if (args.Length > 2)
-                Exit("Too many arguments");
-            StartRedis(args.Length == 2 ? args[1] : null);
             base.OnStart(args);
+            StartRedis();        
         }
 
         protected override void OnStop()
@@ -28,26 +25,28 @@ namespace RedisService
             StopRedis();
         }
 
-        private void StartRedis(string configPath = null)
+        private void StartRedis()
         {
             var pi = new ProcessStartInfo(Path.Combine(_path, RedisServer));
 
-            if (configPath != null)
+            foreach (var file in Directory.GetFiles(_path, "*.conf"))
             {
-                FindPort(configPath);
+                string configPath = Path.Combine(_path, file);
+                int port = FindPort(configPath);
                 // Workaround for spaces in configuration filename.
                 pi.Arguments = Path.GetFileName(configPath);
                 pi.WorkingDirectory = Path.GetDirectoryName(configPath);
-            }
 
-            _process = new Process { StartInfo = pi };
-
-            if (!_process.Start())
-                Exit("Failed to start Redis process");
+                Process process = new Process {StartInfo = pi};
+                _process.Add(process);
+                if (!process.Start())
+                    Exit("Failed to start Redis process for port " + port);
+            }            
         }
 
-        private void FindPort(string path)
+        private int FindPort(string path)
         {
+            int port = 0;
             using (var reader = new StreamReader(path))
             {
                 string line;
@@ -55,18 +54,23 @@ namespace RedisService
                 {
                     if (line.IndexOf("port") == 0)
                     {
-                        _port = int.Parse(line.Substring(5, line.Length - 5));
+                        port = int.Parse(line.Substring(5, line.Length - 5));
                         break;
                     }
                 }
-                if (_port == 0)
+                if (port == 0)
                     Exit("Couldn`t find Redis port in config file");
             }
+
+            return port;
         }
 
         private void StopRedis()
         {
-            _process.Kill();
+            foreach (var process in _process)
+            {
+                process.Kill();
+            }           
         }
 
         static void Exit(string message)
